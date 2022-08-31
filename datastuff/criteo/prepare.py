@@ -16,17 +16,31 @@ from cprint import danger_print, warning_print
 from pyarrow.lib import ArrowInvalid
 from tqdm import tqdm
 from glob import glob
+import gzip
 
 CHUNK_SZ_BYTES = 1024
 
-
+# TODO: Add these functions to utils
 def print_now(*args, **kwargs):
     print(*args, **kwargs)
     sys.stdout.flush()
 
 
+def gunzip(src_file: str, dst_dir: str) -> None:
+    dst_file: Path = Path(dst_dir) / Path(src_file).stem
+    with gzip.open(src_file, "rb") as fsrc:
+        with open(dst_file, "wb") as fdst:
+            shutil.copyfileobj(fsrc, fdst)
+
+
+registered_exts = [ext for _, exts, _ in shutil.get_unpack_formats() for ext in exts]
+if ".gz" not in registered_exts:
+    shutil.register_unpack_format("gunzip", [".gz"], gunzip)
+
+
+# The main code of this file
 def download(dataroot, download_url: str) -> list[Path]:
-    print()
+    print(f"\nDownloading {download_url} to {dataroot}.")
     filename = Path(urlparse(download_url).path).name
     tsvroot = dataroot / "tsv"
     os.makedirs(tsvroot, exist_ok=True)
@@ -44,19 +58,23 @@ def download(dataroot, download_url: str) -> list[Path]:
     else:
         warning_print(f"{dst} already exists, skipping downloading.")
 
-    print_now("Extracting...", end="")
-    shutil.unpack_archive(filename=dst, extract_dir=tsvroot)
-    print_now("Complete.")
+    try:
+        print_now("Extracting...", end="")
+        shutil.unpack_archive(filename=dst, extract_dir=tsvroot)
+        print_now("Complete.")
 
-    # print_now("Deleting archive...", end="")
-    # os.remove(dst)
-    # print_now("Complete.")
+        # print_now("Deleting archive...", end="")
+        # os.remove(dst)
+        # print_now("Complete.")
 
-    return [tsvroot / fname for fname in os.listdir(tsvroot)]
+        return [tsvroot / fname for fname in os.listdir(tsvroot)]
+    except shutil.ReadError:
+        danger_print(f"Unable to extract {dst}")
+        raise
 
 
 def load_tsv(tsvfile: Path) -> Optional[ds.Dataset]:
-    print()
+    print(f"\nLoading {tsvfile} as an Arrow dataset.")
     intcols = [f"i{i}" for i in range(1, 14)]
     strcols = [f"s{i}" for i in range(1, 27)]
     colnames = ["label"] + intcols + strcols
@@ -150,16 +168,16 @@ def main(dataroot: str, s3url: str, download_url: Optional[str]) -> None:
     --s3url='s3://avilabs-mldata-us-west-2/temp'
     --download-url='https://go.criteo.net/criteo-research-kaggle-display-advertising-challenge-dataset.tar.gz'
     """
-    dataroot: Path = Path(dataroot)
+    dataroot_path: Path = Path(dataroot)
     if download_url:
-        downloaded_files: list[Path] = download(dataroot, download_url)
+        downloaded_files: list[Path] = download(dataroot_path, download_url)
     else:
-        tsvroot = dataroot / "tsv"
+        tsvroot = dataroot_path / "tsv"
         downloaded_files = [tsvroot / fname for fname in os.listdir(tsvroot)]
     for downloaded_file in downloaded_files:
         dataset: Optional[ds.Dataset] = load_tsv(downloaded_file)
         files_to_upload: list[Path] = (
-            write_parquet(dataroot, dataset, downloaded_file.stem)
+            write_parquet(dataroot_path, dataset, downloaded_file.stem)
             if dataset
             else [downloaded_file]
         )

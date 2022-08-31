@@ -3,3 +3,4 @@ click
 pyarrow
 tqdm
 avilabsutils-cprint
+types-requests
