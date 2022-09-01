@@ -2,7 +2,7 @@ import os
 import shutil
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Optional, cast
 from urllib.parse import urlparse
 
 import boto3
@@ -19,6 +19,7 @@ from glob import glob
 import gzip
 
 CHUNK_SZ_BYTES = 1024
+
 
 # TODO: Add these functions to utils
 def print_now(*args, **kwargs):
@@ -39,14 +40,19 @@ if ".gz" not in registered_exts:
 
 
 # The main code of this file
-def download(dataroot, download_url: str) -> list[Path]:
-    print(f"\nDownloading {download_url} to {dataroot}.")
-    filename = Path(urlparse(download_url).path).name
+def download(dataroot: Path, download_url: Optional[str]) -> list[Path]:
+    print("---")
+
     tsvroot = dataroot / "tsv"
     os.makedirs(tsvroot, exist_ok=True)
+    urlpath: str = cast(str, urlparse(download_url).path) if download_url else ""
+    filename = Path(urlpath).name
     dst = tsvroot / filename
 
-    if not dst.exists():
+    print(f"Downloading {download_url} to {dst}.")
+
+    if not dst.exists() and download_url:
+        # Download the file, mostly this will be some sort of archive file
         r = requests.get(download_url, stream=True)
         total_bytes = int(r.headers.get("content-length", 0))
         progress_bar = tqdm(total=total_bytes, unit="iB", unit_scale=True)
@@ -55,26 +61,24 @@ def download(dataroot, download_url: str) -> list[Path]:
                 progress_bar.update(len(chunk))
                 f.write(chunk)
         progress_bar.close()
-    else:
-        warning_print(f"{dst} already exists, skipping downloading.")
 
-    try:
-        print_now("Extracting...", end="")
+        # Extract the downloaded archive, this can result in multiple files
         shutil.unpack_archive(filename=dst, extract_dir=tsvroot)
-        print_now("Complete.")
+        os.remove(dst)
+    else:
+        warning_print("Nothing to download.")
 
-        # print_now("Deleting archive...", end="")
-        # os.remove(dst)
-        # print_now("Complete.")
-
-        return [tsvroot / fname for fname in os.listdir(tsvroot)]
-    except shutil.ReadError:
-        danger_print(f"Unable to extract {dst}")
-        raise
+    return [tsvroot / fname for fname in os.listdir(tsvroot)]
 
 
 def load_tsv(tsvfile: Path) -> Optional[ds.Dataset]:
-    print(f"\nLoading {tsvfile} as an Arrow dataset.")
+    print("---")
+
+    print(f"Loading TSV {tsvfile} into dataset.")
+    if not tsvfile.is_file():
+        warning_print("No TSV to load. Skipping.")
+        return None
+
     intcols = [f"i{i}" for i in range(1, 14)]
     strcols = [f"s{i}" for i in range(1, 27)]
     colnames = ["label"] + intcols + strcols
@@ -84,7 +88,6 @@ def load_tsv(tsvfile: Path) -> Optional[ds.Dataset]:
     strschema = [(colname, pa.string()) for colname in strcols]
     schema = pa.schema(labelschema + intschema + strschema)
 
-    print(f"Loading {tsvfile} into dataset.")
     format = ds.CsvFileFormat(
         parse_options=pcsv.ParseOptions(delimiter="\t"),
         read_options=pcsv.ReadOptions(column_names=colnames),
@@ -101,33 +104,41 @@ def load_tsv(tsvfile: Path) -> Optional[ds.Dataset]:
         return None
 
 
-def write_parquet(dataroot: Path, dataset: ds.Dataset, filename: str) -> list[Path]:
-    print()
+def write_parquet(
+    dataroot: Path, dataset: Optional[ds.Dataset], filepath: Path
+) -> list[Path]:
+    print("---")
+
+    print("Writing dataset to parquet.")
+    filename = filepath.stem
     pqroot = dataroot / "parquet"
     os.makedirs(pqroot, exist_ok=True)
-    wo = ds.ParquetFileFormat().make_write_options(compression="gzip")
-    print_now(f"Writing dataset as parquet to {pqroot}...", end="")
-    ds.write_dataset(
-        dataset,
-        pqroot,
-        format="parquet",
-        file_options=wo,
-        basename_template=f"{filename}_" + "{i}.parquet",
-        existing_data_behavior="overwrite_or_ignore",
-    )
-    print_now("Complete.")
+
+    if dataset:
+        wo = ds.ParquetFileFormat().make_write_options(compression="gzip")
+        ds.write_dataset(
+            dataset,
+            pqroot,
+            format="parquet",
+            file_options=wo,
+            basename_template=f"{filename}_" + "{i}.parquet",
+            existing_data_behavior="overwrite_or_ignore",
+        )
+    else:
+        warning_print("Nothing to write as Parquet. Skipping.")
+
     return [Path(f) for f in glob(str(pqroot / f"{filename}_*.parquet"))]
 
 
 def upload_to_s3(src: Path, dst_s3url: str) -> None:
-    print()
-    total_bytes = src.stat().st_size
+    print("---")
 
+    print(f"Uploading {src} to {dst_s3url}")
+    total_bytes = src.stat().st_size
     s3url = urlparse(dst_s3url)
     bucket = s3url.netloc
     prefix = Path(s3url.path).relative_to("/")
     key = prefix / src.name
-    print(f"Uploading {src} to s3://{bucket}/{key}")
     progress_bar = tqdm(total=total_bytes, unit="iB", unit_scale=True)
     try:
         s3 = boto3.client("s3")
@@ -168,19 +179,12 @@ def main(dataroot: str, s3url: str, download_url: Optional[str]) -> None:
     --s3url='s3://avilabs-mldata-us-west-2/temp'
     --download-url='https://go.criteo.net/criteo-research-kaggle-display-advertising-challenge-dataset.tar.gz'
     """
-    dataroot_path: Path = Path(dataroot)
-    if download_url:
-        downloaded_files: list[Path] = download(dataroot_path, download_url)
-    else:
-        tsvroot = dataroot_path / "tsv"
-        downloaded_files = [tsvroot / fname for fname in os.listdir(tsvroot)]
+
+    dataroot_path = Path(dataroot)
+    downloaded_files = download(dataroot_path, download_url)
     for downloaded_file in downloaded_files:
-        dataset: Optional[ds.Dataset] = load_tsv(downloaded_file)
-        files_to_upload: list[Path] = (
-            write_parquet(dataroot_path, dataset, downloaded_file.stem)
-            if dataset
-            else [downloaded_file]
-        )
+        dataset = load_tsv(downloaded_file)
+        files_to_upload = write_parquet(dataroot_path, dataset, downloaded_file)
         for file_to_upload in files_to_upload:
             upload_to_s3(file_to_upload, s3url)
 
