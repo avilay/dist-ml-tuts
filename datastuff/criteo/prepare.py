@@ -148,6 +148,7 @@ def upload_to_s3(src: Path, dst_s3url: str) -> None:
             str(key),
             Callback=lambda chunk: progress_bar.update(chunk),
         )
+        os.remove(src)
     except ClientError as err:
         danger_print(f"Unable to upload {src} to {dst_s3url}!")
         print(err)
@@ -187,6 +188,7 @@ def main(dataroot: str, s3url: str, download_url: Optional[str]) -> None:
         files_to_upload = write_parquet(dataroot_path, dataset, downloaded_file)
         for file_to_upload in files_to_upload:
             upload_to_s3(file_to_upload, s3url)
+        os.remove(downloaded_file)
 
 
 if __name__ == "__main__":
