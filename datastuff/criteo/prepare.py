@@ -45,6 +45,7 @@ def unpack(archive: Path) -> Iterator[Path]:
     tmpdir = archive.parent
     shell.enable_gzip()
     shutil.unpack_archive(filename=archive, extract_dir=tmpdir)
+    archive.unlink()
     return tmpdir.iterdir()
 
 
@@ -128,10 +129,17 @@ def main(criteo_url: str, s3_url) -> None:
     tmpdir = Path.home() / "temp" / "prepare"
     archive = download(criteo_url, tmpdir)
     files = unpack(archive)
-    tsvs = filter(totsv, files)
+    # tsvs = filter(lambda dset: dset is not None, map(totsv, files))
+    # datasets = []
+    # for file in files:
+    #     datasets.append(totsv(file))
+    # datasets = map(totsv, files)
+    # print(list(datasets))
+    tsvs = filter(lambda x: x is not None, map(totsv, files))
     pqs = chain.from_iterable(map(topq, tsvs))
-    upload_s3: Callable[[Path], None] = partial(upload, s3_url)
-    map(upload_s3, pqs)
+    # print(list(pqs))
+    # upload_s3: Callable[[Path], None] = partial(upload, s3_url)
+    # map(upload_s3, pqs)
 
 
 if __name__ == "__main__":
