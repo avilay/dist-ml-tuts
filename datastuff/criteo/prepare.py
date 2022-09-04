@@ -10,12 +10,14 @@ import requests
 from tqdm import tqdm
 import shell
 import shutil
-from cprint import info_print
+from cprint import info_print, danger_print
 import pyarrow as pa
 import pyarrow.csv as pcsv
 from pyarrow.lib import ArrowInvalid
 from functools import partial
 from itertools import chain
+import boto3
+from botocore.exceptions import ClientError
 
 
 CHUNK_SZ_BYTES = 1024
@@ -90,7 +92,22 @@ def topq(tsv: ds.Dataset) -> Iterator[Path]:
 
 
 def upload(s3_url: str, pq: Path) -> None:
-    pass
+    info_print(f"Uploading {pq.name} to S3.")
+
+    total_bytes = pq.stat().st_size
+    s3url = urlparse(s3_url)
+    bucket = s3url.netloc
+    prefix = Path(s3url.path).relative_to("/")
+    key = prefix / pq.name
+    progress_bar = tqdm(total=total_bytes, unit="iB", unit_scale=True)
+    try:
+        s3 = boto3.client("s3")
+        s3.upload_file(
+            str(pq), bucket, str(key), Callback=lambda chunk: progress_bar.update(chunk)
+        )
+    except ClientError as err:
+        danger_print("Unable to upload!")
+        print(err)
 
 
 @click.command()
