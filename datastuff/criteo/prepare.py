@@ -1,6 +1,6 @@
 import click
 from pathlib import Path
-from typing import Optional, Callable
+from typing import Optional
 from collections.abc import Iterator
 import pyarrow.dataset as ds
 
@@ -14,7 +14,6 @@ from cprint import info_print, danger_print
 import pyarrow as pa
 import pyarrow.csv as pcsv
 from pyarrow.lib import ArrowInvalid
-from functools import partial
 from itertools import chain
 import boto3
 from botocore.exceptions import ClientError
@@ -122,24 +121,15 @@ def upload(s3_url: str, pq: Path) -> None:
 )
 def main(criteo_url: str, s3_url) -> None:
     """Help for this script. Here is where I explain what arg is doing."""
-    # upload(map(topq, filter(totsv, unpack(download(criteo_url)))))
-
     # with TemporaryDirectory() as tmpdirname:
     # tmpdir = Path(tmpdirname)
     tmpdir = Path.home() / "temp" / "prepare"
     archive = download(criteo_url, tmpdir)
     files = unpack(archive)
-    # tsvs = filter(lambda dset: dset is not None, map(totsv, files))
-    # datasets = []
-    # for file in files:
-    #     datasets.append(totsv(file))
-    # datasets = map(totsv, files)
-    # print(list(datasets))
     tsvs = filter(lambda x: x is not None, map(totsv, files))
     pqs = chain.from_iterable(map(topq, tsvs))
-    # print(list(pqs))
-    # upload_s3: Callable[[Path], None] = partial(upload, s3_url)
-    # map(upload_s3, pqs)
+    for pq in pqs:
+        upload(s3_url, pq)
 
 
 if __name__ == "__main__":
