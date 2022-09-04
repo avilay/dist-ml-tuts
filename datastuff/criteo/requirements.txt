@@ -4,3 +4,4 @@ pyarrow
 tqdm
 avilabsutils-cprint
 types-requests
+avilabsutils-shell
