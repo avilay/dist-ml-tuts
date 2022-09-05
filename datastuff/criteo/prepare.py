@@ -1,23 +1,22 @@
-import click
-from pathlib import Path
-from typing import Optional
-from collections.abc import Iterator
-import pyarrow.dataset as ds
-
-# from tempfile import TemporaryDirectory
-from urllib.parse import urlparse
-import requests
-from tqdm import tqdm
-import shell
 import shutil
-from cprint import info_print, danger_print
+from collections.abc import Iterator
+from itertools import chain
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from typing import Optional
+from urllib.parse import urlparse
+
+import boto3
+import click
 import pyarrow as pa
 import pyarrow.csv as pcsv
-from pyarrow.lib import ArrowInvalid
-from itertools import chain
-import boto3
+import pyarrow.dataset as ds
+import requests
+import shell
 from botocore.exceptions import ClientError
-
+from cprint import danger_print, info_print, warning_print
+from pyarrow.lib import ArrowInvalid
+from tqdm import tqdm
 
 CHUNK_SZ_BYTES = 1024
 
@@ -70,7 +69,7 @@ def totsv(file: Path) -> Optional[ds.Dataset]:
         dataset.head(5)
         return dataset
     except ArrowInvalid:
-        info_print(f"{file} is not a TSV file. Skipping.")
+        warning_print(f"\t{file} is not a TSV file. Skipping.")
         return None
 
 
@@ -121,15 +120,14 @@ def upload(s3_url: str, pq: Path) -> None:
 )
 def main(criteo_url: str, s3_url) -> None:
     """Help for this script. Here is where I explain what arg is doing."""
-    # with TemporaryDirectory() as tmpdirname:
-    # tmpdir = Path(tmpdirname)
-    tmpdir = Path.home() / "temp" / "prepare"
-    archive = download(criteo_url, tmpdir)
-    files = unpack(archive)
-    tsvs = filter(lambda x: x is not None, map(totsv, files))
-    pqs = chain.from_iterable(map(topq, tsvs))
-    for pq in pqs:
-        upload(s3_url, pq)
+    with TemporaryDirectory() as tmpdirname:
+        tmpdir = Path(tmpdirname)
+        archive = download(criteo_url, tmpdir)
+        files = unpack(archive)
+        tsvs = filter(lambda x: x is not None, map(totsv, files))
+        pqs = chain.from_iterable(map(topq, tsvs))
+        for pq in pqs:
+            upload(s3_url, pq)
 
 
 if __name__ == "__main__":
