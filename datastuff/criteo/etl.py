@@ -1,3 +1,17 @@
+"""Extract-Transform-Load utility for Criteo dataset.
+
+This stand-alone module is used to download a single file from the Criteo dataset,
+transform it from gzipped csv to parquet, and then upload it back to a specified
+S3 location.
+
+Attributes:
+    CHUNK_SZ_BYTES: The number of bytes to download from Criteo in one go.
+
+Example::
+
+    python etl.py --criteo-url='https://storage.googleapis.com/criteo-cail-datasets/day_0.gz' --s3-url='s3://avilabs-mldata-us-west-2/criteo/onetb/data/day=0/'
+
+"""
 import shutil
 from collections.abc import Iterator
 from itertools import chain
@@ -48,6 +62,23 @@ def unpack(archive: Path) -> Iterator[Path]:
 
 
 def totsv(file: Path) -> Optional[ds.Dataset]:
+    """Creates a schematized PyArrow TSV dataset.
+
+    Loads the input file as a PyArrow TSV dataset with the following schema -
+      - The first 13 columns as integers and named i1, i2, ..., i13
+      - The next 26 columns as strings and named s1, s2, ..., s26
+      - The last column as an integer and named label
+
+    Files that are not TSV files or those that do not have the right schema are
+    ignored.
+
+    Args:
+        file: The local path of the file to be convered.
+
+    Returns:
+        A PyArrow dataset object representing the schematized TSV or None if the
+        file was not a TSV or did not have the right schema.
+    """
     info_print(f"Converting {file.name} to TSV dataset.")
 
     intcols = [f"i{i}" for i in range(1, 14)]
@@ -74,6 +105,18 @@ def totsv(file: Path) -> Optional[ds.Dataset]:
 
 
 def topq(tsv: ds.Dataset) -> Iterator[Path]:
+    """Converts a TSV dataset to one or more partitioned Parquet files.
+
+    Takes the input TSV dataset and creates Parquet files in the same directory
+    that had the original TSV file. This function uses the default dataset writer
+    so it will result in only a single
+
+    Args:
+        tsv: Schematized PyArrow TSV dataset.
+
+    Returns:
+        Local paths of one or more partitioned Parquet file.
+    """
     info_print("Converting TSV dataset to Parquet file.")
 
     source_file = Path(tsv.files[0])
@@ -91,6 +134,22 @@ def topq(tsv: ds.Dataset) -> Iterator[Path]:
 
 
 def upload(s3_url: str, pq: Path) -> None:
+    """Uploads the Parquet file to the S3 URL.
+
+    Creates an S3 key by appending the name of the Parquet file
+    (e.g., filename.ext) to the passed in S3 prefix (e.g., /path/to/folder/) so
+    that the resulting key is /path/to/folder/filename.ext. Uploads the Parquet
+    file with this key to S3.
+
+    Args:
+        s3_url: This is in the form of s3://bucket/path/to/folder/.
+        pq: This is the full local path of the Parquet file.
+
+    Returns:
+        None: Regardless of whether the file upload was successful or not, this
+        function will always return None. For the unsuccessful case, it will
+        print the error before returning.
+    """
     info_print(f"Uploading {pq.name} to S3.")
 
     total_bytes = pq.stat().st_size
@@ -109,7 +168,7 @@ def upload(s3_url: str, pq: Path) -> None:
         print(err)
 
 
-@click.command()
+@click.command(help=__doc__)
 @click.option(
     "--criteo-url",
     help="The source url to download the data archive file from.",
@@ -119,7 +178,6 @@ def upload(s3_url: str, pq: Path) -> None:
     help="The destination S3 location to upload the parquet files to.",
 )
 def main(criteo_url: str, s3_url) -> None:
-    """Help for this script. Here is where I explain what arg is doing."""
     with TemporaryDirectory() as tmpdirname:
         tmpdir = Path(tmpdirname)
         archive = download(criteo_url, tmpdir)
