@@ -1,8 +1,8 @@
 """Extract-Transform-Load utility for Criteo dataset.
 
-This stand-alone module is used to download a single file from the Criteo dataset,
-transform it from gzipped csv to parquet, and then upload it back to a specified
-S3 location.
+This stand-alone module is used to download a single file from the Criteo 
+dataset, transform it from gzipped csv to gzipped parquet, and then upload it 
+back to a specified S3 location.
 
 Attributes:
     CHUNK_SZ_BYTES: The number of bytes to download from Criteo in one go.
@@ -14,7 +14,7 @@ Example::
 """
 import shutil
 from collections.abc import Iterator
-from itertools import chain
+
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Optional
@@ -22,6 +22,7 @@ from urllib.parse import urlparse
 
 import boto3
 import click
+import msg
 import pyarrow as pa
 import pyarrow.csv as pcsv
 import pyarrow.dataset as ds
@@ -36,6 +37,19 @@ CHUNK_SZ_BYTES = 1024
 
 
 def download(criteo_url: str, tmpdir: Path) -> Path:
+    """Downloads the Criteo data file.
+
+    The Criteo URL is usually in the form https://path/to/file/filename.tar.gz.
+    This function will download the file as `tmpdir/filename.tar.gz`. It also
+    shows a helpful little progress bar for the download.
+
+    Args:
+        criteo_url: The URL from where to download the file.
+        tmpdir: The directory where the downloaded file is to be saved.
+
+    Returns:
+        The local path of the downloaded file.
+    """
     info_print("Downloading criteo archive.")
 
     url = urlparse(criteo_url).path
@@ -52,9 +66,25 @@ def download(criteo_url: str, tmpdir: Path) -> Path:
 
 
 def unpack(archive: Path) -> Iterator[Path]:
+    """Unpacks the input archive file.
+
+    The input archive file is unpacked in the same directory it is in. The directory
+    is expected to have only the single archive file in it. The archive file
+    is expected to be in .tar.gz format and can have multiple files packed in it.
+    The archive file is deleted after it has been unpacked, and all the remaining
+    unpacked files in the directory are returned as an iterator.
+
+    Args:
+        archive: The local path of the archive file.
+
+    Returns:
+        An iterator of all the unpacked files.
+    """
     info_print(f"Unpacking downloaded archive {archive.name}.")
 
     tmpdir = archive.parent
+    if len(list(tmpdir.iterdir())) > 1:
+        raise RuntimeError(f"{tmpdir} must have only the downloaded file in it!")
     shell.enable_gzip()
     shutil.unpack_archive(filename=archive, extract_dir=tmpdir)
     archive.unlink()
@@ -104,18 +134,18 @@ def totsv(file: Path) -> Optional[ds.Dataset]:
         return None
 
 
-def topq(tsv: ds.Dataset) -> Iterator[Path]:
-    """Converts a TSV dataset to one or more partitioned Parquet files.
+def topq(tsv: ds.Dataset) -> Path:
+    """Converts TSV dataset into Parquet format.
 
-    Takes the input TSV dataset and creates Parquet files in the same directory
-    that had the original TSV file. This function uses the default dataset writer
-    so it will result in only a single
+    Creates a gzipped Parquet file in the same directory as the input TSV file. If the
+    input TSV file is in /path/to/filename.tsv then the Parquet file will be
+    saved as /path/to/filename_0.parquet.
 
     Args:
-        tsv: Schematized PyArrow TSV dataset.
+        tsv: The PyArrow Dataset representing the original TSV file.
 
     Returns:
-        Local paths of one or more partitioned Parquet file.
+        The local file path of the output Parquet file.
     """
     info_print("Converting TSV dataset to Parquet file.")
 
@@ -130,7 +160,12 @@ def topq(tsv: ds.Dataset) -> Iterator[Path]:
         existing_data_behavior="overwrite_or_ignore",
     )
 
-    return source_file.parent.glob("*.parquet")
+    expected_outfile = source_file.parent / f"{source_file.stem}_0.parquet"
+    if not expected_outfile.exists():
+        raise RuntimeError(
+            f"Expected to see {expected_outfile} but instead found {list(source_file.parent.glob('*.parquet'))}"
+        )
+    return expected_outfile
 
 
 def upload(s3_url: str, pq: Path) -> None:
@@ -142,7 +177,7 @@ def upload(s3_url: str, pq: Path) -> None:
     file with this key to S3.
 
     Args:
-        s3_url: This is in the form of s3://bucket/path/to/folder/.
+        s3_url: This is in the form of s3://bucket/path/to/folder/
         pq: This is the full local path of the Parquet file.
 
     Returns:
@@ -183,9 +218,10 @@ def main(criteo_url: str, s3_url) -> None:
         archive = download(criteo_url, tmpdir)
         files = unpack(archive)
         tsvs = filter(lambda x: x is not None, map(totsv, files))
-        pqs = chain.from_iterable(map(topq, tsvs))
+        pqs = map(topq, tsvs)
         for pq in pqs:
             upload(s3_url, pq)
+    msg.sms("+12066173488", f"Processed {criteo_url[:50]}")
 
 
 if __name__ == "__main__":
