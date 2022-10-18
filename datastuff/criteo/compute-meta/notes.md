@@ -3,6 +3,10 @@
 #### Script Location
 s3://avilabs-us-west-2-scratch/scripts/dense_meta.py
 
+```
+aws s3 cp dense_meta.py s3://avilabs-us-west-2-scratch/scripts/dense_meta.py
+```
+
 #### Script Arguments: 
   * --data-url=s3://avilabs-mldata-us-west-2/criteo/onetb/data/
   * --metadata-url=s3://avilabs-us-west-2-scratch/output/dense2.json
