@@ -13,23 +13,28 @@ import click
 @click.option(
     "--metadata-url", required=True, help="S3 location where metadata will be saved."
 )
-def main(data_url, metadata_url):
+@click.option("--colname", required=True, help="The column name to collect tokens for.")
+def main(data_url, metadata_url, colname):
     spark = SparkSession.builder.getOrCreate()
-    strcols = [f"s{i}" for i in range(1, 27)]
+    # strcols = [f"s{i}" for i in range(1, 27)]
     df = spark.read.parquet(data_url)
+    tokcounts = df.groupby(colname).count().collect()
+    toks = {}
+    for tok, count in tokcounts:
+        toks[tok] = count
 
-    all_toks = {}
-    for col in strcols:
-        all_toks[col] = {}
-        toks = df.groupby(col).count().sort("count", ascending=False).collect()
-        for tok, count in toks:
-            all_toks[col][tok] = count
+    # all_toks = {}
+    # for col in strcols:
+    #     all_toks[col] = {}
+    #     toks = df.groupby(col).count().sort("count", ascending=False).collect()
+    #     for tok, count in toks:
+    #         all_toks[col][tok] = count
 
     with TemporaryDirectory() as tmpdirname:
         tmpdir = Path(tmpdirname)
         mlfile = tmpdir / "sparse.json"
         with mlfile.open("wt") as jf:
-            json.dump(all_toks, jf, indent=2)
+            json.dump(toks, jf, indent=2)
 
         s3 = boto3.client("s3")
         s3url = urlparse(metadata_url)
