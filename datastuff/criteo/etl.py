@@ -1,7 +1,7 @@
 """Extract-Transform-Load utility for Criteo dataset.
 
-This stand-alone module is used to download a single file from the Criteo 
-dataset, transform it from gzipped csv to gzipped parquet, and then upload it 
+This stand-alone module is used to download a single file from the Criteo
+dataset, transform it from gzipped csv to gzipped parquet, and then upload it
 back to a specified S3 location.
 
 Attributes:

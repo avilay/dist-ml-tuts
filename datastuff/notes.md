@@ -28,6 +28,10 @@ EFS has this weird Infrequent Access tier which is comparable to S3. But it has 
 
 I'll start with S3 Infrequent Access tier and see how it goes. If there are problems then the next best thing is S3 standard.
 
+Another option is that I use S3 for permanent storage. But when I am about to start training, I load a Postgresql db on a single memory optimized node. That way I'll proabably spend around ~$0.50 per hour of training, but my training will presumably go much faster because I can just build a map style dataset with very fast random access. A more cost effective solution would've been to use HBase whose strength is random reads (and writes for that matter) on data that is backed by HDFS or S3. But there is a learning curve involved there. There is no pure Python client. I do have options to use REST, Thrift, or C++ clients. But I'll have to first set up the EMR cluster, install HBase on it, load the data, and then use it via some non-native interface. Too much trouble.
+
+Instead of postgres I can use sqlite3. Create a `criteo.db` with a table for each day. And each row having a unique ID. That way I can still use day as the "partition key" and the row ID as the "row key" for faster access. I can keep this db in a separate snapshot. When I am about to start training, I'll typically use a multi-GPU machine which has plenty of host memory. So I can just create a volume out of this snapshot, attach it to the GPU VM and have the dataset just read sqlite directly. Of course this only works for single host training. For multi host training I'd need to replace sqlite with postgres, but the same principle applies.
+
 ## Compute Meta
 
 Do my processing. This will cost me an EC2 instance running for a few hours. But I'll have to code it up by myself.
